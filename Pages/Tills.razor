@@ -1,0 +1,168 @@
+﻿@page "/tills"
+@using Microsoft.AspNetCore.Authorization;
+@using Microsoft.AspNetCore.Identity;
+@using InventMS.Data;
+@inject UserManager<ApplicationUser> _UserManager
+@inject RoleManager<IdentityRole> _RoleManager
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject TillService tillService
+@inject NavigationManager NavigationManager
+
+<h3>Tills</h3>
+<AuthorizeView>
+    <Authorized>
+        @if (@context.User.IsInRole(ADMINISTRATION_ROLE))
+        {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Id</th>
+                    <th>User</th>
+                    <th>Start</th>
+                    <th>End</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (ColTills is null)
+                {
+                    <p><em>Loading... !</em></p>
+                }
+                else
+                {
+                    @foreach (var till in ColTills)
+                    {
+                    <tr>
+                        <td>@till.Id</td>
+                        <td>@till.User.UserName</td>
+                        <td>@till.Start</td>
+                        <td>@till.End</td>
+                    </tr>
+                    }
+                }
+            </tbody>
+        </table>
+        @if (ShowPopup)
+        {
+            <div class="modal" tabindex="-1" style="display:block" role="dialog">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <!-- Button to close the popup -->
+                            <button type="button" class="close"
+                                    @onclick="ClosePopup">
+                                <span aria-hidden="true">X</span>
+                            </button>
+                        </div>
+                        <!-- Edit form for the current forecast -->
+                        <div class="modal-body">
+                            <span style="color:red">@strError</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+        }
+        else
+        {
+           <table class="table">
+                <thead>
+                    <tr>
+                        <th>Id</th>
+                        <th>Start</th>
+                        <th>End</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (ColTills is null)
+                    {
+                        <p><em>Loading... !</em></p>
+                    }
+                    else
+                    {
+                        @foreach (var till in ColTills)
+                        {
+                        <tr>
+                            <td>@till.Id</td>
+                            <td>@till.Start</td>
+                            <td>@till.End</td>
+                        </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+            <button class="btn btn-success" @onclick="StartSales">Start Sales</button>
+        }
+    </Authorized>
+    <NotAuthorized>
+        <p>You're not loggged in.</p>
+    </NotAuthorized>
+</AuthorizeView>
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> authenticationStateTask { get; set; }
+
+    string ADMINISTRATION_ROLE = "Administrators";
+    System.Security.Claims.ClaimsPrincipal CurrentUser;
+
+    // To enable showing the Popup
+    bool ShowPopup = false;
+
+    // To hold any possible errors
+    string strError = "";
+
+    List<Till> ColTills;
+
+
+
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ensure there is a ADMINISTRATION_ROLE
+        var RoleResult = await _RoleManager.FindByNameAsync(ADMINISTRATION_ROLE);
+        if (RoleResult == null)
+        {
+            // Create ADMINISTRATION_ROLE Role
+            await _RoleManager.CreateAsync(new IdentityRole(ADMINISTRATION_ROLE));
+        }
+
+        // Ensure a user named admin@email.com is an Administrator
+        var user = await _UserManager.FindByNameAsync("admin@email.com");
+        if (user != null)
+        {
+            // Is admin@email.com in administrator role?
+            var UserResult = await _UserManager.IsInRoleAsync(user, ADMINISTRATION_ROLE);
+            if (!UserResult)
+            {
+                // Put admin in Administrator role
+                await _UserManager.AddToRoleAsync(user, ADMINISTRATION_ROLE);
+            }
+        }
+
+        // Get the current logged in user
+        CurrentUser = (await authenticationStateTask).User;
+
+        await GetTill();
+    }
+
+    public async Task GetTill()
+    {
+        var user = await _UserManager.GetUserAsync(CurrentUser);
+        ColTills = await tillService.GetAllTillAsync(user);
+    }
+
+    void StartSales()
+    {
+        NavigationManager.NavigateTo("tills/sales");
+    }
+
+    void EndSales()
+    {
+        ShowPopup = true;        
+    }
+
+    void ClosePopup()
+    {
+        // Close the Popup
+        ShowPopup = false;
+    }
+}

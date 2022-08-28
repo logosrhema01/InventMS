@@ -1,0 +1,377 @@
+﻿@page "/tills/sales"
+@using Microsoft.AspNetCore.Authorization;
+@using Microsoft.AspNetCore.Identity;
+@using System.Timers;
+@using InventMS.Data;
+@inject ProtectedLocalStorage BrowserStorage
+@inject UserManager<ApplicationUser> _UserManager
+@inject RoleManager<IdentityRole> _RoleManager
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject TillService tillService
+@inject ProductService productService
+@inject TransactionService transactionService
+@inject NavigationManager NavigationManager
+
+
+<h3>Tills</h3>
+<AuthorizeView>
+    <Authorized>
+        @if (@context.User.IsInRole(ADMINISTRATION_ROLE))
+        {
+        
+            @if (ShowPopup)
+            {
+                <div class="modal" tabindex="-1" style="display:block" role="dialog">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <!-- Button to close the popup -->
+                                <button type="button" class="close"
+                                        @onclick="ClosePopup">
+                                    <span aria-hidden="true">X</span>
+                                </button>
+                            </div>
+                            <!-- Edit form for the current forecast -->
+                            <div class="modal-body">
+                                <span style="color:red">@strError</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+        else
+        {
+           <h1>Current Sales Schedule <span class="text-primary">@countDown</span></h1>
+           <div class="container">
+              <div class="row justify-content-between">
+                <div class="col-6 border">
+                  <h3>Total Order</h3>
+                  <table border="1" cellpadding="3">
+                    <thead>
+                        <tr>
+                            <th class="col-2">Name</th>
+                            <th class="col-2">Quantiy</th>
+                            <th class="col-2">Unit</th>
+                            <th class="col-2">Total Price</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var order in Orders)
+                            {
+                        <tr>
+                            <td class="col-2">@order.Product.Name</td>
+                            <td class="col-2">@order.Quantity</td>
+                            <td class="col-2">@order.Product.Price</td>
+                            <td class="col-2">@order.TotalPrice</td>
+                            <td>
+                                <!-- Edit the current forecast -->
+                                <button class="btn btn-danger"
+                                        @onclick="(() => RemoveOrder(order))">
+                                    X
+                                </button>
+                            </td>
+                        </tr>
+                            }
+                    </tbody>
+                     <tfoot>
+                        <tr>
+                            <td colspan="3">Total</td>
+                            <td>@TotalPrice</td>
+                        </tr>
+                    </tfoot>
+                  </table>
+                  <div class="row">
+                        <button class="btn btn-danger m-2" @onclick="ClearOrder" disabled=@(!Orders.Any())>Clear Order</button>
+                        <button class="btn btn-primary m-2" @onclick="SaveOrder" disabled=@(!Orders.Any())>Complete Order</button>
+                      </div>
+                </div>
+                <div class="col-6 border p-5">
+                  <h3>Add Item</h3>
+                  <div class="row">
+                    <input class="form-control m-1" id="productObj_barcode" type="text"
+                        @bind="@search_BarCode"
+                        placeholder="barcode"
+                    />
+                    <button type="button" class="btn btn-primary"
+                        @onclick="SearchByBarCode">
+                        <span aria-hidden="true">Search by Barcode</span>
+                    </button>
+                  </div>
+                  <div class="row">
+                    
+                    <label for="productObj_name">Name</label>
+                    <input class="form-control m-1" id="productObj_name" type="text"
+                        @bind="@productObj.Name"
+                        disabled
+                        placeholder="Name"
+                    />
+                    <label for="productObj_description">Description</label>
+                    <input class="form-control m-1" id="productObj_description" type="text"
+                        @bind="@productObj.Description"
+                        disabled
+                        placeholder="Description"
+                    />
+                    <label for="productObj_BarCode">BarCode</label>
+                    <input class="form-control m-1" id="productObj_BarCode" type="text"
+                        @bind="@productObj.BarCode"
+                        disabled
+                        placeholder="BarCode"
+                    />
+                    <label for="productObj_Quantity">Quantity (Total: @productObj.Quantity)</label>
+                    <input class="form-control m-1" id="productObj_Quantity" type="number"
+                        @bind="@productObj_Quantity"
+                        placeholder="Quantity"
+                    />
+                    <label for="productObj_Price">Price</label>
+                    <input class="form-control m-1" id="productObj_Price" type="number"
+                        @bind="@productObj.Price"
+                        disabled
+                        placeholder="Price"
+                    />
+                    <div class="row">
+                      <button type="button" class="btn btn-primary"
+                        @onclick="AddToOrder"
+                        disabled=@(productObj.Name == null? true: false)
+                      >
+                        <span aria-hidden="true">Add To Order</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="row">
+                      <p style="color:red">@strError</p>
+                    </div>
+                </div>
+              </div>
+            </div>
+           <button class="btn btn-danger" @onclick="EndSales">End Sales</button>
+           @if(ShowPopup) 
+           {
+                <div class="modal" tabindex="-1" style="display:block" role="dialog">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <!-- Button to close the popup -->
+                                <button type="button" class="close"
+                                        @onclick="ClosePopup">
+                                    <span aria-hidden="true">X</span>
+                                </button>
+                            </div>
+                            <!-- Edit form for the current forecast -->
+                            <div class="modal-body">
+                                <h3 class="text-success">Order Created</h3>
+                                <table id="simple_table" border="1" cellpadding="3">
+                                  <thead>
+                                      <tr>
+                                          <th class="col-2">Name</th>
+                                          <th class="col-2">Quantiy</th>
+                                          <th class="col-2">Unit</th>
+                                          <th class="col-2">Total Price</th>
+                                      </tr>
+                                  </thead>
+                                  <tbody>
+                                      @foreach (var order in Orders)
+                                          {
+                                      <tr>
+                                          <td class="col-2">@order.Product.Name</td>
+                                          <td class="col-2">@order.Quantity</td>
+                                          <td class="col-2">@order.Product.Price</td>
+                                          <td class="col-2">@order.TotalPrice</td>
+                                      </tr>
+                                          }
+                                  </tbody>
+                                  <tfoot>
+                                      <tr>
+                                          <td colspan="3">Total</td>
+                                          <td>@TotalPrice</td>
+                                      </tr>
+                                  </tfoot>
+                                </table>
+                                <button class="btn btn-primary m-2" onclick="printDiv('simple_table')">Print Order</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+           }
+        }
+    </Authorized>
+    <NotAuthorized>
+        <p>You're not loggged in.</p>
+    </NotAuthorized>
+</AuthorizeView>
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> authenticationStateTask { get; set; }
+
+    string ADMINISTRATION_ROLE = "Administrators";
+    System.Security.Claims.ClaimsPrincipal CurrentUser;
+
+    // To enable showing the Popup
+    bool ShowPopup = false;
+
+    // To hold any possible errors
+    string strError = "";
+
+    // CountDown String
+    string countDown = "";
+
+    Till tillObj = new Till();
+
+    Product productObj = new Product();
+
+    string search_BarCode = "";
+
+    DateTime tillObj_End;
+
+    // Create Orders List
+    List<Order> Orders = new List<Order>();
+
+    int productObj_Quantity;
+
+    // Total Price
+    double TotalPrice = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ensure there is a ADMINISTRATION_ROLE
+        var RoleResult = await _RoleManager.FindByNameAsync(ADMINISTRATION_ROLE);
+        if (RoleResult == null)
+        {
+            // Create ADMINISTRATION_ROLE Role
+            await _RoleManager.CreateAsync(new IdentityRole(ADMINISTRATION_ROLE));
+        }
+
+        // Ensure a user named admin@email.com is an Administrator
+        var user = await _UserManager.FindByNameAsync("admin@email.com");
+        if (user != null)
+        {
+            // Is admin@email.com in administrator role?
+            var UserResult = await _UserManager.IsInRoleAsync(user, ADMINISTRATION_ROLE);
+            if (!UserResult)
+            {
+                // Put admin in Administrator role
+                await _UserManager.AddToRoleAsync(user, ADMINISTRATION_ROLE);
+            }
+        }
+
+        // Get the current logged in user
+        CurrentUser = (await authenticationStateTask).User;
+
+        await ContinueOrStartSales();
+    }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+          var result = await BrowserStorage.GetAsync<List<Order>>("orders");
+          Console.WriteLine(result);
+          Orders = result != null ? result : new List<Order>();
+          Orders.ForEach(x => TotalPrice += x.TotalPrice);
+          StateHasChanged();
+        }
+    }
+
+    public async Task ContinueOrStartSales()
+    {
+        var user = await _UserManager.GetUserAsync(CurrentUser);
+
+        tillObj = await tillService.GetUserTill(user);
+        tillObj_End = tillObj.Start.AddHours(8);
+        DisplayTimer();
+    }
+
+    public async void SearchByBarCode()
+    {
+      try {
+        productObj = await productService.GetProductByBarCodeAsync(search_BarCode);
+        productObj_Quantity = 1;
+        strError = "";
+      } catch(Exception ex) {
+        strError = ex.Message;
+      }
+    }
+
+    public async void AddToOrder()
+    {
+      var product = await productService.GetProductAsync(productObj.Id);
+      if(productObj_Quantity > product.Quantity) 
+      {
+        strError = "Not enough stock";
+        return;
+      }
+      if(Orders.Exists(x=> x.Product.Id == product.Id))
+      {
+        strError = "Product already in order";
+        return;
+      }
+      Order newOrder = new Order() { Quantity = productObj_Quantity, UnitPrice = productObj.Price, Product = product };
+      newOrder.TotalPrice = productObj.Price * productObj_Quantity;
+      strError = "";
+
+      Orders.Add(newOrder);
+      // Update total Price
+      Orders.ForEach(x => TotalPrice += x.TotalPrice);
+      await SaveToLocal();  
+    }
+    public async Task SaveToLocal()
+    {
+      await BrowserStorage.SetAsync("orders", Orders);
+      StateHasChanged();
+    }
+
+    void DisplayTimer()
+    {
+        Timer t = new Timer();
+        t.Interval = 500;
+        t.Elapsed +=new ElapsedEventHandler(t_Tick);
+        TimeSpan? ts = tillObj_End.Subtract(DateTime.Now);
+        countDown = ts?.ToString(@"hh\:mm\:ss");
+        t.Start();
+    }
+
+    async void t_Tick(object sender, EventArgs e)
+    {
+        TimeSpan? ts = tillObj_End.Subtract(DateTime.Now);
+        countDown = ts?.ToString(@"hh\:mm\:ss");
+        await InvokeAsync(StateHasChanged); 
+    }
+
+    public async void EndSales()
+    {
+        var user = await _UserManager.GetUserAsync(CurrentUser);
+
+        var success = await tillService.EndSales(user, tillObj.Id);
+        if(success) NavigationManager.NavigateTo("tills");      
+    }
+
+    public async void RemoveOrder(Order order)
+    {
+      Orders.Remove(order);
+      Orders.ForEach(x => TotalPrice += x.TotalPrice);
+      await SaveToLocal();
+    }
+
+    public async void ClearOrder()
+    {
+      Orders.Clear();
+      TotalPrice = 0;
+      await SaveToLocal();
+    }
+    
+    public async void SaveOrder()
+    {
+      var user = await _UserManager.GetUserAsync(CurrentUser);
+
+      await transactionService.InsertTransactionAsync(Orders, user, tillObj.Id, TotalPrice);
+
+      ShowPopup = true;
+    }
+
+    void ClosePopup()
+    {
+        // Close the Popup
+        ShowPopup = false;
+        Orders.Clear();
+        TotalPrice = 0;
+    }
+}

@@ -1,0 +1,220 @@
+﻿@page "/categories"
+@using Microsoft.AspNetCore.Authorization;
+@using Microsoft.AspNetCore.Identity;
+@using InventMS.Data;
+@inject UserManager<ApplicationUser> _UserManager
+@inject RoleManager<IdentityRole> _RoleManager
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject CategoryService categoryService
+
+<h3>Categories</h3>
+<AuthorizeView>
+    <Authorized>
+        @if (@context.User.IsInRole(ADMINISTRATION_ROLE))
+        {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Id</th>
+                    <th>Name</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (ColCategories is null)
+                {
+                    <p><em>Loading... !</em></p>
+                }
+                else
+                {
+                    @foreach (var category in ColCategories)
+                    {
+                    <tr>
+                        <td>@category.Id</td>
+                        <td>@category.Name</td>
+                        <td>
+                            <!-- Edit the current forecast -->
+                            <button class="btn btn-primary"
+                                    @onclick="(() => EditCategory(category))">
+                                Edit
+                            </button>
+                        </td>
+                    </tr>
+                    }
+                }
+            </tbody>
+        </table>
+        @if (ShowPopup)
+        {
+            <div class="modal" tabindex="-1" style="display:block" role="dialog">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            @if(categoryObj.Id is 0)
+                            {
+                              <h3 class="modal-title">Add Category</h3>
+                            }
+                            else
+                            {
+                              <h3 class="modal-title">Edit Category</h3>  
+                            }
+                            <!-- Button to close the popup -->
+                            <button type="button" class="close"
+                                    @onclick="ClosePopup">
+                                <span aria-hidden="true">X</span>
+                            </button>
+                        </div>
+                        <!-- Edit form for the current forecast -->
+                        <div class="modal-body">
+                            <!-- Only show Id if not a new user -->
+                            <input class="form-control" type="text"
+                                @bind="categoryObj.Name"
+                                placeholder="Name"
+                            />
+                            <br />
+                            <!-- Button to save the user -->
+                            <button class="btn btn-primary"
+                                    @onclick="SaveCategory">
+                                Save
+                            </button>
+                            <button class="btn btn-danger"
+                                    @onclick="DeleteCategory">
+                                Delete
+                            </button>
+                            
+                            <br />
+                            <span style="color:red">@strError</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+        <button class="btn btn-success" @onclick="AddNewCategory">Add Category</button>
+        }
+        else
+        {
+        <p>You're not signed in as a user in @ADMINISTRATION_ROLE.</p>
+        }
+    </Authorized>
+    <NotAuthorized>
+        <p>You're not loggged in.</p>
+    </NotAuthorized>
+</AuthorizeView>
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> authenticationStateTask { get; set; }
+
+    string ADMINISTRATION_ROLE = "Administrators";
+    System.Security.Claims.ClaimsPrincipal CurrentUser;
+
+    // To enable showing the Popup
+    bool ShowPopup = false;
+
+    // To hold any possible errors
+    string strError = "";
+
+    // Create a new Category Object
+    Category categoryObj = new Category();
+
+
+    List<Category> ColCategories;
+
+
+
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ensure there is a ADMINISTRATION_ROLE
+        var RoleResult = await _RoleManager.FindByNameAsync(ADMINISTRATION_ROLE);
+        if (RoleResult == null)
+        {
+            // Create ADMINISTRATION_ROLE Role
+            await _RoleManager.CreateAsync(new IdentityRole(ADMINISTRATION_ROLE));
+        }
+
+        // Ensure a user named admin@email.com is an Administrator
+        var user = await _UserManager.FindByNameAsync("admin@email.com");
+        if (user != null)
+        {
+            // Is admin@email.com in administrator role?
+            var UserResult = await _UserManager.IsInRoleAsync(user, ADMINISTRATION_ROLE);
+            if (!UserResult)
+            {
+                // Put admin in Administrator role
+                await _UserManager.AddToRoleAsync(user, ADMINISTRATION_ROLE);
+            }
+        }
+
+        // Get the current logged in user
+        CurrentUser = (await authenticationStateTask).User;
+
+        await GetCategory();
+    }
+
+    public async Task GetCategory()
+    {
+        ColCategories = await Task.Run(()=>categoryService.GetAllCategoryAsync());
+    }
+
+    void AddNewCategory()
+    {
+        categoryObj = new Category();
+        ShowPopup = true;
+    }
+
+    protected async Task SaveCategory()
+    {
+         try
+        {
+            // Is this an existing user?
+            if (categoryObj.Id.ToString() is null)
+            {
+                // Add the category to the database
+                await categoryService.InsertCategoryAsync(categoryObj);
+            }
+            else
+            {
+                // Update the category in the database
+                await categoryService.UpdateCategoryAsync(categoryObj);
+            }
+
+            // Close the Popup
+            ShowPopup = false;
+
+            // Refresh Category list
+            await GetCategory();
+        }
+        catch (Exception ex)
+        {
+            strError = ex.GetBaseException().Message;
+        }
+    }
+
+    void EditCategory(Category category)
+    {
+        categoryObj = category;
+        ShowPopup = true;
+    }
+
+    protected async Task DeleteCategory()
+    {
+        // Close the Popup
+        ShowPopup = false;
+
+        // Get the category to delete
+        var category = await categoryService.GetCategoryAsync(categoryObj.Id);
+        if (category != null)
+        {
+            // Delete the category
+            await categoryService.DeleteCategoryAsync(category);
+        }
+
+        // Refresh Category
+        await GetCategory();
+    }
+
+    void ClosePopup()
+    {
+        // Close the Popup
+        ShowPopup = false;
+    }
+}

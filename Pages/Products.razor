@@ -1,0 +1,285 @@
+@page "/products"
+@using Microsoft.AspNetCore.Authorization;
+@using Microsoft.AspNetCore.Identity;
+@using InventMS.Data;
+@inject UserManager<ApplicationUser> _UserManager
+@inject RoleManager<IdentityRole> _RoleManager
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject ProductService productService
+@inject CategoryService categoryService
+
+<h3>Products</h3>
+<AuthorizeView>
+    <Authorized>
+        @if (@context.User.IsInRole(ADMINISTRATION_ROLE))
+        {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Description</th>
+                    <th>BarCode</th>
+                    <th>Quantity</th>
+                    <th>Price</th>
+                    <th>Category</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (ColProducts is null)
+                {
+                    <p><em>Loading... !</em></p>
+                }
+                else
+                {
+                    @foreach (var product in ColProducts)
+                    {
+                    <tr>
+                        <td>@product.Name</td>
+                        <td>@product.Description</td>
+                        <td>@product.BarCode</td>
+                        <td>@product.Quantity</td>
+                        <td>@product.Price</td>
+                        <td>@product.Category.Name</td>
+                        <td>
+                            <!-- Edit the current forecast -->
+                            <button class="btn btn-primary"
+                                    @onclick="(() => EditProduct(product))">
+                                Edit
+                            </button>
+                        </td>
+                    </tr>
+                    }
+                }
+            </tbody>
+        </table>
+        @if (ShowPopup)
+        {
+            <div class="modal" tabindex="-1" style="display:block" role="dialog">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            @if(productObj.Id.ToString() is "00000000-0000-0000-0000-000000000000")
+                            {
+                              <h3 class="modal-title">Add Product</h3>
+                            }
+                            else
+                            {
+                              <h3 class="modal-title">Edit Product</h3>  
+                            }
+                            <!-- Button to close the popup -->
+                            <button type="button" class="close"
+                                    @onclick="ClosePopup">
+                                <span aria-hidden="true">X</span>
+                            </button>
+                        </div>
+                        <!-- Edit form for the current forecast -->
+                        <div class="modal-body">
+                            <!-- Only show Id if not a new user -->
+                            <label for="productObj_name">Name</label>
+                            <input class="form-control m-1" id="productObj_name" type="text"
+                                @bind="@productObj.Name"
+                                placeholder="Name"
+                            />
+                            <label for="productObj_description">Description</label>
+                            <input class="form-control m-1" id="productObj_description" type="text"
+                                @bind="@productObj.Description"
+                                placeholder="Description"
+                            />
+                            <label for="productObj_BarCode">BarCode</label>
+                            <input class="form-control m-1" id="productObj_BarCode" type="text"
+                                @bind="@productObj.BarCode"
+                                placeholder="BarCode"
+                            />
+                            <label for="productObj_Quantity">Quantity</label>
+                            <input class="form-control m-1" id="productObj_Quantity" type="number"
+                                @bind="@productObj.Quantity"
+                                placeholder="Quantity"
+                            />
+                            <label for="productObj_Price">Price</label>
+                            <input class="form-control m-1" id="productObj_Price" type="number"
+                                @bind="@productObj.Price"
+                                placeholder="Price"
+                            />
+                            <label for="productObj_Category">Category</label>
+                            <select @bind="@productObj_CategoryId" id="productObj_Category" class="form-control m-1">
+                                @if(productObj.Id.ToString() is "00000000-0000-0000-0000-000000000000")
+                                {
+                                  <option value="">-Select Category-</option>
+                                  @foreach (var category in ColCategories)
+                                  {
+                                    <option value="@category.Id">@category.Name</option>
+                                  }
+                                }
+                                else
+                                {
+                                  <option value="">-Select Category-</option>
+                                  <option value="@productObj.Category.Id" selected>@productObj.Category.Name</option>
+                                  @foreach (var category in ColCategories)
+                                  {
+                                    @if (category.Id != @productObj.Category.Id)
+                                    {
+                                      <option value="@category.Id">@category.Name</option>
+                                    }
+                                  } 
+                                }
+                            </select>
+                            <br />
+                            <!-- Button to save the user -->
+                            <button class="btn btn-primary"
+                                    @onclick="SaveProduct">
+                                Save
+                            </button>
+                            <button class="btn btn-danger"
+                                    @onclick="DeleteProduct">
+                                Delete
+                            </button>
+                            
+                            <br />
+                            <span style="color:red">@strError</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+        <button class="btn btn-success" @onclick="AddNewProduct">Add Product</button>
+        }
+        else
+        {
+        <p>You're not signed in as a user in @ADMINISTRATION_ROLE.</p>
+        }
+    </Authorized>
+    <NotAuthorized>
+        <p>You're not loggged in.</p>
+    </NotAuthorized>
+</AuthorizeView>
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> authenticationStateTask { get; set; }
+
+    string ADMINISTRATION_ROLE = "Administrators";
+    System.Security.Claims.ClaimsPrincipal CurrentUser;
+
+    // To enable showing the Popup
+    bool ShowPopup = false;
+
+    // To hold any possible errors
+    string strError = "";
+
+    // Create a new Product Object
+    Product productObj = new Product();
+
+    // Get all Categories
+    List<Category> ColCategories;
+
+
+    List<Product> ColProducts;
+
+    string productObj_CategoryId = "";
+
+
+
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ensure there is a ADMINISTRATION_ROLE
+        var RoleResult = await _RoleManager.FindByNameAsync(ADMINISTRATION_ROLE);
+        if (RoleResult == null)
+        {
+            // Create ADMINISTRATION_ROLE Role
+            await _RoleManager.CreateAsync(new IdentityRole(ADMINISTRATION_ROLE));
+        }
+
+        // Ensure a user named admin@email.com is an Administrator
+        var user = await _UserManager.FindByNameAsync("admin@email.com");
+        if (user != null)
+        {
+            // Is admin@email.com in administrator role?
+            var UserResult = await _UserManager.IsInRoleAsync(user, ADMINISTRATION_ROLE);
+            if (!UserResult)
+            {
+                // Put admin in Administrator role
+                await _UserManager.AddToRoleAsync(user, ADMINISTRATION_ROLE);
+            }
+        }
+
+        // Get the current logged in user
+        CurrentUser = (await authenticationStateTask).User;
+
+        await GetProduct();
+    }
+
+    public async Task GetProduct()
+    {
+        ColProducts = await Task.Run(()=>productService.GetAllProductAsync());
+    }
+
+    protected async Task AddNewProduct()
+    {
+        productObj = new Product();
+        productObj.Category = new Category();
+        ColCategories = await categoryService.GetAllCategoryAsync();
+        ShowPopup = true;
+    }
+
+    protected async Task SaveProduct()
+    {
+         try
+        {
+            // Is this an existing user?
+          if (productObj.Id.ToString() is "00000000-0000-0000-0000-000000000000")
+            {
+                // Add the Product to the database
+                await productService.InsertProductAsync(productObj, Int16.Parse(productObj_CategoryId));
+            }
+            else
+            {
+                // Update the Product in the database
+                await productService.UpdateProductAsync(productObj, Int16.Parse(productObj_CategoryId));
+            }
+
+            // Close the Popup
+            ShowPopup = false;
+
+            // Refresh Product list
+            await GetProduct();
+
+            strError = "";
+        }
+        catch (Exception ex)
+        {
+            strError = ex.GetBaseException().Message;
+        }
+    }
+
+    protected async Task EditProduct(Product product)
+    {
+        productObj = product;
+        productObj_CategoryId = product.Category.Id.ToString();
+        ColCategories = await categoryService.GetAllCategoryAsync();
+        ShowPopup = true;
+    }
+
+    protected async Task DeleteProduct()
+    {
+        // Close the Popup
+        ShowPopup = false;
+
+        // Get the Product to delete
+        var product = await productService.GetProductAsync(productObj.Id);
+        Console.WriteLine(product);
+        if (product != null)
+        {
+            // Delete the product
+            await productService.DeleteProductAsync(product);
+        }
+
+        // Refresh product
+        await GetProduct();
+    }
+
+    void ClosePopup()
+    {
+        // Close the Popup
+        ShowPopup = false;
+    }
+}
